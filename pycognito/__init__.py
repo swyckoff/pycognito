@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 import requests
 
 from .aws_srp import AWSSRP
-from .exceptions import TokenVerificationException, MFAChallengeException
+from .exceptions import MFAChallengeException, TokenVerificationException
 
 
 def cognito_to_dict(attr_list, attr_map=None):
@@ -427,7 +427,7 @@ class Cognito:
             "ConfirmationCode": confirmation_code,
         }
         self._add_secret_hash(params, "SecretHash")
-        self.client.confirm_sign_up(**params)
+        return self.client.confirm_sign_up(**params)
 
     def resend_confirmation_code(self, username):
         """
@@ -440,7 +440,7 @@ class Cognito:
             "Username": username,
         }
         self._add_secret_hash(params, "SecretHash")
-        self.client.resend_confirmation_code(**params)
+        return self.client.resend_confirmation_code(**params)
 
     def admin_authenticate(self, password):
         """
@@ -515,7 +515,7 @@ class Cognito:
 
     def admin_update_profile(self, attrs, attr_map=None):
         user_attrs = dict_to_cognito(attrs, attr_map)
-        self.client.admin_update_user_attributes(
+        return self.client.admin_update_user_attributes(
             UserPoolId=self.user_pool_id,
             Username=self.username,
             UserAttributes=user_attrs,
@@ -529,7 +529,7 @@ class Cognito:
         names we would like to show to our users
         """
         user_attrs = dict_to_cognito(attrs, attr_map)
-        self.client.update_user_attributes(
+        return self.client.update_user_attributes(
             UserAttributes=user_attrs, AccessToken=self.access_token
         )
 
@@ -650,7 +650,7 @@ class Cognito:
         :param attribute: Attribute to confirm. Defaults to "email"
         """
         self.check_token()
-        self.client.get_user_attribute_verification_code(
+        return self.client.get_user_attribute_verification_code(
             AccessToken=self.access_token, AttributeName=attribute
         )
 
@@ -686,20 +686,20 @@ class Cognito:
         """
         params = {"ClientId": self.client_id, "Username": self.username}
         self._add_secret_hash(params, "SecretHash")
-        self.client.forgot_password(**params)
+        return self.client.forgot_password(**params)
 
     def delete_user(self):
-        self.client.delete_user(AccessToken=self.access_token)
+        return self.client.delete_user(AccessToken=self.access_token)
 
     def admin_delete_user(self):
-        self.client.admin_delete_user(
+        return self.client.admin_delete_user(
             UserPoolId=self.user_pool_id, Username=self.username
         )
 
     def admin_reset_password(self, username, client_metadata=None):
         if client_metadata is None:
             client_metadata = {}
-        self.client.admin_reset_user_password(
+        return self.client.admin_reset_user_password(
             UserPoolId=self.user_pool_id,
             Username=username,
             ClientMetadata=client_metadata,
@@ -797,7 +797,7 @@ class Cognito:
         :param group_name: the name of the group to add the user to
         :return:
         """
-        self.client.admin_add_user_to_group(
+        return self.client.admin_add_user_to_group(
             UserPoolId=self.user_pool_id,
             Username=username,
             GroupName=group_name,
@@ -810,7 +810,7 @@ class Cognito:
         :param group_name: the name of the group to remove the user from
         :return:
         """
-        self.client.admin_remove_user_from_group(
+        return self.client.admin_remove_user_from_group(
             UserPoolId=self.user_pool_id,
             Username=username,
             GroupName=group_name,
@@ -852,7 +852,7 @@ class Cognito:
         :param username:
         :return:
         """
-        self.client.admin_enable_user(
+        return self.client.admin_enable_user(
             UserPoolId=self.user_pool_id,
             Username=username,
         )
@@ -863,7 +863,7 @@ class Cognito:
         :param username:
         :return:
         """
-        self.client.admin_disable_user(
+        return self.client.admin_disable_user(
             UserPoolId=self.user_pool_id,
             Username=username,
         )
@@ -879,7 +879,7 @@ class Cognito:
         :param provider_details: The identity provider details
         :return:
         """
-        self.client.create_identity_provider(
+        return self.client.create_identity_provider(
             UserPoolId=pool_id,
             ProviderName=provider_name,
             ProviderType=provider_type,
@@ -905,7 +905,7 @@ class Cognito:
         :param provider_name: The identity provider name
         :return:
         """
-        self.client.update_identity_provider(
+        return self.client.update_identity_provider(
             UserPoolId=pool_id,
             ProviderName=provider_name,
             **kwargs,
@@ -929,7 +929,7 @@ class Cognito:
         :param client_id: The identity pool name
         :return:
         """
-        self.client.update_user_pool_client(
+        return self.client.update_user_pool_client(
             UserPoolId=pool_id,
             ClientId=client_id,
             **kwargs,
@@ -984,7 +984,7 @@ class Cognito:
             raise ValueError(
                 "preferred must have a value of 'SMS', 'SOFTWARE_TOKEN', or None."
             )
-        self.client.set_user_mfa_preference(
+        return self.client.set_user_mfa_preference(
             SMSMfaSettings=sms_mfa_settings,
             SoftwareTokenMfaSettings=software_token_mfa_settings,
             AccessToken=self.access_token,
