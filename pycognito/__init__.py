@@ -1,6 +1,7 @@
 import ast
 import datetime
 import re
+from typing import Optional
 
 import boto3
 from envs import env
@@ -8,7 +9,7 @@ from jose import JWTError, jwt
 import requests
 
 from .aws_srp import AWSSRP
-from .exceptions import MFAChallengeException, TokenVerificationException
+from .exceptions import MFAChallengeException, TokenVerificationException, NewPasswordChallengeException
 
 
 def cognito_to_dict(attr_list, attr_map=None):
@@ -41,9 +42,10 @@ def dict_to_cognito(attributes, attr_map=None):
             return "true" if val else "false"
         return val
 
-    return [
-        {"Name": key, "Value": normalize(value)} for key, value in attributes.items()
-    ]
+    return [{
+        "Name": key,
+        "Value": normalize(value)
+    } for key, value in attributes.items()]
 
 
 def camel_to_snake(camel_str):
@@ -51,9 +53,8 @@ def camel_to_snake(camel_str):
     :param camel_str: string
     :return: string converted from a CamelCase to a snake_case
     """
-    return re.sub(
-        "([a-z0-9])([A-Z])", r"\1_\2", re.sub("(.)([A-Z][a-z]+)", r"\1_\2", camel_str)
-    ).lower()
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2",
+                  re.sub("(.)([A-Z][a-z]+)", r"\1_\2", camel_str)).lower()
 
 
 def snake_to_camel(snake_str):
@@ -66,9 +67,13 @@ def snake_to_camel(snake_str):
 
 
 class UserObj:
-    def __init__(
-        self, username, attribute_list, cognito_obj, metadata=None, attr_map=None
-    ):
+
+    def __init__(self,
+                 username,
+                 attribute_list,
+                 cognito_obj,
+                 metadata=None,
+                 attr_map=None):
         """
         :param username:
         :param attribute_list:
@@ -80,7 +85,8 @@ class UserObj:
         self._data = cognito_to_dict(attribute_list, self._attr_map)
         self.sub = self._data.pop("sub", None)
         self.email_verified = self._data.pop("email_verified", None)
-        self.phone_number_verified = self._data.pop("phone_number_verified", None)
+        self.phone_number_verified = self._data.pop("phone_number_verified",
+                                                    None)
         self._metadata = {} if metadata is None else metadata
 
     def __repr__(self):
@@ -116,6 +122,7 @@ class UserObj:
 
 
 class GroupObj:
+
     def __init__(self, group_data, cognito_obj):
         """
         :param group_data: a dictionary with information about a group
@@ -174,9 +181,8 @@ class Cognito:
 
         self.user_pool_id = user_pool_id
         self.client_id = client_id
-        self.user_pool_region = (
-            user_pool_region if user_pool_region else self.user_pool_id.split("_")[0]
-        )
+        self.user_pool_region = (user_pool_region if user_pool_region else
+                                 self.user_pool_id.split("_")[0])
         self.username = username
         self.id_token = id_token
         self.access_token = access_token
@@ -188,7 +194,6 @@ class Cognito:
         self.custom_attributes = None
         self.base_attributes = None
         self.pool_jwk = None
-        self.mfa_tokens = None
 
         if not boto3_client_kwargs:
             boto3_client_kwargs = {}
@@ -225,8 +230,8 @@ class Cognito:
         # If it is not there use the requests library to get it
         else:
             self.pool_jwk = requests.get(
-                f"{self.user_pool_url}/.well-known/jwks.json", timeout=15
-            ).json()
+                f"{self.user_pool_url}/.well-known/jwks.json",
+                timeout=15).json()
         return self.pool_jwk
 
     def get_key(self, kid):
@@ -278,9 +283,11 @@ class Cognito:
         setattr(self, f"{token_use}_claims", verified)
         return verified
 
-    def get_user_obj(
-        self, username=None, attribute_list=None, metadata=None, attr_map=None
-    ):
+    def get_user_obj(self,
+                     username=None,
+                     attribute_list=None,
+                     metadata=None,
+                     attr_map=None):
         """
         Returns the specified user
         :param username: Username of the user
@@ -349,7 +356,11 @@ class Cognito:
 
         self.custom_attributes = custom_attributes
 
-    def register(self, username, password, attr_map=None, client_metadata=None):
+    def register(self,
+                 username,
+                 password,
+                 attr_map=None,
+                 client_metadata=None):
         """
         Register the user. Other base attributes from AWS Cognito User Pools
         are address, birthdate, email, family_name (last name), gender,
@@ -442,7 +453,9 @@ class Cognito:
         self._add_secret_hash(params, "SecretHash")
         return self.client.resend_confirmation_code(**params)
 
-    def admin_authenticate(self, password):
+    def admin_authenticate(self,
+                           password: str,
+                           new_password: Optional[str] = None):
         """
         Authenticate the user using admin super privileges
         :param password: User's password
@@ -457,6 +470,10 @@ class Cognito:
             AuthFlow="ADMIN_NO_SRP_AUTH",
             AuthParameters=auth_params,
         )
+        if tokens and 'ChallengeName' in tokens and tokens[
+                'ChallengeName'] == 'NEW_PASSWORD_REQUIRED':
+            raise NewPasswordChallengeException("New password required",
+                                                tokens)
         self._set_tokens(tokens)
 
     def authenticate(self, password, client_metadata=None):
@@ -477,7 +494,6 @@ class Cognito:
         try:
             tokens = aws.authenticate_user(client_metadata=client_metadata)
         except MFAChallengeException as mfa_challenge:
-            self.mfa_tokens = mfa_challenge.get_tokens()
             raise mfa_challenge
         else:
             self._set_tokens(tokens)
@@ -530,8 +546,7 @@ class Cognito:
         """
         user_attrs = dict_to_cognito(attrs, attr_map)
         return self.client.update_user_attributes(
-            UserAttributes=user_attrs, AccessToken=self.access_token
-        )
+            UserAttributes=user_attrs, AccessToken=self.access_token)
 
     def get_user(self, attr_map=None):
         """
@@ -569,9 +584,8 @@ class Cognito:
         page_token = response.get("PaginationToken")
 
         while page_token:
-            response = self.client.list_users(
-                UserPoolId=self.user_pool_id, PaginationToken=page_token
-            )
+            response = self.client.list_users(UserPoolId=self.user_pool_id,
+                                              PaginationToken=page_token)
             user_list.extend(response.get("Users"))
             page_token = response.get("PaginationToken")
 
@@ -581,8 +595,7 @@ class Cognito:
                 attribute_list=user.get("Attributes"),
                 metadata={"username": user.get("Username")},
                 attr_map=attr_map,
-            )
-            for user in user_list
+            ) for user in user_list
         ]
 
     def admin_get_user(self, attr_map=None):
@@ -592,9 +605,8 @@ class Cognito:
         names we would like to show to our users
         :return: UserObj dictionary
         """
-        user = self.client.admin_get_user(
-            UserPoolId=self.user_pool_id, Username=self.username
-        )
+        user = self.client.admin_get_user(UserPoolId=self.user_pool_id,
+                                          Username=self.username)
         user_metadata = {
             "enabled": user.get("Enabled"),
             "user_status": user.get("UserStatus"),
@@ -651,8 +663,7 @@ class Cognito:
         """
         self.check_token()
         return self.client.get_user_attribute_verification_code(
-            AccessToken=self.access_token, AttributeName=attribute
-        )
+            AccessToken=self.access_token, AttributeName=attribute)
 
     def validate_verification(self, confirmation_code, attribute="email"):
         """
@@ -692,9 +703,8 @@ class Cognito:
         return self.client.delete_user(AccessToken=self.access_token)
 
     def admin_delete_user(self):
-        return self.client.admin_delete_user(
-            UserPoolId=self.user_pool_id, Username=self.username
-        )
+        return self.client.admin_delete_user(UserPoolId=self.user_pool_id,
+                                             Username=self.username)
 
     def admin_reset_password(self, username, client_metadata=None):
         if client_metadata is None:
@@ -740,9 +750,8 @@ class Cognito:
         to a parameters dictionary at a specified key
         """
         if self.client_secret is not None:
-            secret_hash = AWSSRP.get_secret_hash(
-                self.username, self.client_id, self.client_secret
-            )
+            secret_hash = AWSSRP.get_secret_hash(self.username, self.client_id,
+                                                 self.client_secret)
             parameters[key] = secret_hash
 
     def _set_tokens(self, tokens):
@@ -750,10 +759,10 @@ class Cognito:
         Helper function to verify and set token attributes based on a Cognito
         AuthenticationResult.
         """
-        self.verify_token(
-            tokens["AuthenticationResult"]["AccessToken"], "access_token", "access"
-        )
-        self.verify_token(tokens["AuthenticationResult"]["IdToken"], "id_token", "id")
+        self.verify_token(tokens["AuthenticationResult"]["AccessToken"],
+                          "access_token", "access")
+        self.verify_token(tokens["AuthenticationResult"]["IdToken"],
+                          "id_token", "id")
         if "RefreshToken" in tokens["AuthenticationResult"]:
             self.refresh_token = tokens["AuthenticationResult"]["RefreshToken"]
         self.token_type = tokens["AuthenticationResult"]["TokenType"]
@@ -765,8 +774,7 @@ class Cognito:
         :param attribute_dict: Dictionary of attribute names and values
         """
         status_code = response.get(
-            "HTTPStatusCode", response["ResponseMetadata"]["HTTPStatusCode"]
-        )
+            "HTTPStatusCode", response["ResponseMetadata"]["HTTPStatusCode"])
         if status_code == 200:
             for key, value in attribute_dict.items():
                 setattr(self, key, value)
@@ -777,9 +785,8 @@ class Cognito:
         :param group_name: name of a group
         :return: instance of the self.group_class
         """
-        response = self.client.get_group(
-            GroupName=group_name, UserPoolId=self.user_pool_id
-        )
+        response = self.client.get_group(GroupName=group_name,
+                                         UserPoolId=self.user_pool_id)
         return self.get_group_obj(response.get("Group"))
 
     def get_groups(self):
@@ -788,7 +795,10 @@ class Cognito:
         :return: list of instances of self.group_class
         """
         response = self.client.list_groups(UserPoolId=self.user_pool_id)
-        return [self.get_group_obj(group_data) for group_data in response.get("Groups")]
+        return [
+            self.get_group_obj(group_data)
+            for group_data in response.get("Groups")
+        ]
 
     def admin_add_user_to_group(self, username, group_name):
         """
@@ -830,8 +840,7 @@ class Cognito:
             return groups
 
         groups_response = self.client.admin_list_groups_for_user(
-            Username=username, UserPoolId=self.user_pool_id, Limit=60
-        )
+            Username=username, UserPoolId=self.user_pool_id, Limit=60)
         user_groups = process_groups_response(groups_response)
 
         while "NextToken" in groups_response.keys():
@@ -868,9 +877,9 @@ class Cognito:
             Username=username,
         )
 
-    def admin_create_identity_provider(
-        self, pool_id, provider_name, provider_type, provider_details, **kwargs
-    ):
+    def admin_create_identity_provider(self, pool_id, provider_name,
+                                       provider_type, provider_details,
+                                       **kwargs):
         """
         Creates an identity provider
         :param pool_id: The user pool ID
@@ -895,8 +904,7 @@ class Cognito:
         :return: dict of identity provider
         """
         return self.client.describe_identity_provider(
-            UserPoolId=pool_id, ProviderName=provider_name
-        )
+            UserPoolId=pool_id, ProviderName=provider_name)
 
     def admin_update_identity_provider(self, pool_id, provider_name, **kwargs):
         """
@@ -919,10 +927,10 @@ class Cognito:
         :return: client json
         """
         return self.client.describe_user_pool_client(
-            UserPoolId=pool_id, ClientId=client_id
-        )["UserPoolClient"]
+            UserPoolId=pool_id, ClientId=client_id)["UserPoolClient"]
 
-    def admin_update_user_pool_client(self, pool_id: str, client_id: str, **kwargs):
+    def admin_update_user_pool_client(self, pool_id: str, client_id: str,
+                                      **kwargs):
         """
         Updates configuration information of a specified user pool app client
         :param pool_id: The identity pool ID
@@ -941,7 +949,8 @@ class Cognito:
         :return: Secret code
         :rtype: string
         """
-        response = self.client.associate_software_token(AccessToken=self.access_token)
+        response = self.client.associate_software_token(
+            AccessToken=self.access_token)
         return response["SecretCode"]
 
     def verify_software_token(self, code, device_name=""):
@@ -953,11 +962,15 @@ class Cognito:
         :rtype: bool
         """
         response = self.client.verify_software_token(
-            AccessToken=self.access_token, UserCode=code, FriendlyDeviceName=device_name
-        )
+            AccessToken=self.access_token,
+            UserCode=code,
+            FriendlyDeviceName=device_name)
         return response["Status"] == "SUCCESS"
 
-    def set_user_mfa_preference(self, sms_mfa, software_token_mfa, preferred=None):
+    def set_user_mfa_preference(self,
+                                sms_mfa,
+                                software_token_mfa,
+                                preferred=None):
         """
         Register the preference of MFA.
         :param sms_mfa: Enable SMS MFA.
@@ -990,17 +1003,17 @@ class Cognito:
             AccessToken=self.access_token,
         )
 
-    def respond_to_software_token_mfa_challenge(self, code, mfa_tokens=None):
+    def respond_to_software_token_mfa_challenge(self,
+                                                code,
+                                                challenge_tokens=None):
         """
         Response to software token MFA challenge.
         :param code: software token MFA code.
         :type code: string
-        :param mfa_token: Token stored in MFAChallengeException. Optional if you have not regenerated the Cognito instance.
-        :type mfa_token: string
+        :param challenge_tokens: Token stored in ChallengeException.
+        :type challenge_token: string
         :return:
         """
-        if not mfa_tokens:
-            mfa_tokens = self.mfa_tokens
         challenge_responses = {
             "USERNAME": self.username,
             "SOFTWARE_TOKEN_MFA_CODE": str(code),
@@ -1008,23 +1021,45 @@ class Cognito:
         self._add_secret_hash(challenge_responses, "SECRET_HASH")
         tokens = self.client.respond_to_auth_challenge(
             ClientId=self.client_id,
-            Session=mfa_tokens["Session"],
+            Session=challenge_tokens["Session"],
             ChallengeName="SOFTWARE_TOKEN_MFA",
             ChallengeResponses=challenge_responses,
         )
         self._set_tokens(tokens)
 
-    def respond_to_sms_mfa_challenge(self, code, mfa_tokens=None):
+    def respond_to_new_password_required_challenge(self,
+                                                   new_password,
+                                                   challenge_tokens=None):
+        """
+        Response to software token MFA challenge.
+        :param code: software token MFA code.
+        :type code: string
+        :param challenge_tokens: Token stored in ChallengeException.
+        :type challenge_token: string
+        :return:
+        """
+        challenge_responses = {
+            "USERNAME": self.username,
+            "NEW_PASSWORD": new_password,
+        }
+        self._add_secret_hash(challenge_responses, "SECRET_HASH")
+        tokens = self.client.respond_to_auth_challenge(
+            ClientId=self.client_id,
+            Session=challenge_tokens['Session'],
+            ChallengeName="NEW_PASSWORD_REQUIRED",
+            ChallengeResponses=challenge_responses,
+        )
+        self._set_tokens(tokens)
+
+    def respond_to_sms_mfa_challenge(self, code, challenge_tokens=None):
         """
         Response to SMS MFA challenge.
         :param code: SMS MFA code.
         :type code: string
-        :param mfa_tokens: Token stored in MFAChallengeException. Optional if you have not regenerated the Cognito instance.
-        :type mfa_tokens: string
+        :param challenge_tokens: Token stored in ChallengeException.
+        :type challenge_token: string
         :return:
         """
-        if not mfa_tokens:
-            mfa_tokens = self.mfa_tokens
         challenge_responses = {
             "USERNAME": self.username,
             "SMS_MFA_CODE": code,
@@ -1032,7 +1067,7 @@ class Cognito:
         self._add_secret_hash(challenge_responses, "SECRET_HASH")
         tokens = self.client.respond_to_auth_challenge(
             ClientId=self.client_id,
-            Session=mfa_tokens["Session"],
+            Session=challenge_tokens["Session"],
             ChallengeName="SMS_MFA",
             ChallengeResponses=challenge_responses,
         )
